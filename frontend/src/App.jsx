@@ -12,6 +12,8 @@ import ReportsPage from "./pages/ReportsPage";
 import CatalogsPage from "./pages/CatalogsPage";
 import ShiftsPage from "./pages/ShiftsPage";
 import CaregiverPortalPage from "./pages/CaregiverPortalPage";
+import MedicationPage from "./pages/MedicationPage";
+import SeparacaoPage from "./pages/SeparacaoPage";
 
 export default function App() {
   const isMobile = useIsMobile();
@@ -123,6 +125,8 @@ export default function App() {
           {tab === "monthly" && <MonthlyClosePage caregivers={caregivers} shifts={shifts} setShifts={setShifts} extras={extras} setExtras={setExtras} />}
           {tab === "reports" && <ReportsPage caregivers={caregivers} elders={elders} />}
           {tab === "cgs" && <CatalogsPage caregivers={caregivers} setCaregivers={setCaregivers} elders={elders} setElders={setElders} serviceTypes={serviceTypes} setServiceTypes={setServiceTypes} />}
+          {tab === "meds" && <MedicationPage elders={elders} />}
+          {tab === "sep" && <SeparacaoPage elders={elders} />}
         </main>
 
         {isMobile && <BottomNav tab={tab} setTab={setTab} />}

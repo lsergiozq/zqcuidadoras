@@ -45,6 +45,8 @@ export const TABS = [
   ["monthly", "🗓️", "Mensal"],
   ["reports", "📑", "Relatórios"],
   ["cgs", "🗂️", "Cadastros"],
+  ["meds", "💊", "Medicamentos"],
+  ["sep", "📦", "Separação"],
 ];
 
 export function BottomNav({ tab, setTab }) {

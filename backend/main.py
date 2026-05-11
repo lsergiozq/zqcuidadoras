@@ -334,6 +334,89 @@ SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_extra_charges_entry_type ON extra_charges (entry_type)",
     "CREATE INDEX IF NOT EXISTS idx_extra_charges_elder_id ON extra_charges (elder_id)",
     "CREATE INDEX IF NOT EXISTS idx_extra_charges_service_type_id ON extra_charges (service_type_id)",
+    # ── Medicamentos ──────────────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS medications (
+        id TEXT PRIMARY KEY,
+        nome TEXT NOT NULL,
+        principio_ativo TEXT,
+        concentracao TEXT,
+        apresentacao TEXT NOT NULL DEFAULT 'comprimido',
+        observacoes_gerais TEXT,
+        ativo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS prescricoes (
+        id TEXT PRIMARY KEY,
+        idoso_id TEXT NOT NULL REFERENCES elders(id) ON DELETE CASCADE,
+        medicamento_id TEXT NOT NULL REFERENCES medications(id) ON DELETE RESTRICT,
+        vigencia_inicio TEXT NOT NULL,
+        vigencia_fim TEXT,
+        observacao_geral TEXT,
+        ativo BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS horarios_prescricao (
+        id TEXT PRIMARY KEY,
+        prescricao_id TEXT NOT NULL REFERENCES prescricoes(id) ON DELETE CASCADE,
+        faixa_horario TEXT NOT NULL,
+        hora_exata TEXT,
+        dias_semana TEXT NOT NULL DEFAULT '[1,2,3,4,5,6,7]',
+        dose TEXT NOT NULL,
+        observacao TEXT,
+        ordem INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS separacoes_semanais (
+        id TEXT PRIMARY KEY,
+        idoso_id TEXT NOT NULL REFERENCES elders(id) ON DELETE CASCADE,
+        semana_inicio TEXT NOT NULL,
+        semana_fim TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'rascunho',
+        gerado_por TEXT,
+        gerado_em TEXT NOT NULL,
+        fechado_por TEXT,
+        fechado_em TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (idoso_id, semana_inicio)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS itens_separacao (
+        id TEXT PRIMARY KEY,
+        separacao_id TEXT NOT NULL REFERENCES separacoes_semanais(id) ON DELETE CASCADE,
+        horario_prescricao_id TEXT REFERENCES horarios_prescricao(id) ON DELETE SET NULL,
+        medicamento_nome TEXT NOT NULL,
+        faixa_horario TEXT NOT NULL,
+        hora_exata TEXT,
+        dose TEXT NOT NULL,
+        dias_semana TEXT NOT NULL,
+        observacao_prescricao TEXT,
+        status TEXT NOT NULL DEFAULT 'pendente',
+        falta_compra BOOLEAN NOT NULL DEFAULT FALSE,
+        observacao_falta TEXT,
+        observacao_separacao TEXT,
+        marcado_por TEXT,
+        marcado_em TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_prescricoes_idoso_id ON prescricoes (idoso_id)",
+    "CREATE INDEX IF NOT EXISTS idx_prescricoes_medicamento_id ON prescricoes (medicamento_id)",
+    "CREATE INDEX IF NOT EXISTS idx_horarios_prescricao_id ON horarios_prescricao (prescricao_id)",
+    "CREATE INDEX IF NOT EXISTS idx_separacoes_idoso_semana ON separacoes_semanais (idoso_id, semana_inicio)",
+    "CREATE INDEX IF NOT EXISTS idx_itens_separacao_id ON itens_separacao (separacao_id)",
 ]
 
 _pool_lock = asyncio.Lock()
@@ -2054,6 +2137,460 @@ async def caregiver_payment_report(
     return {"items": items, "summary": summary}
 
 
+import json as _json
+import datetime as _dt
+
+# ── Medicamentos ──────────────────────────────────────────────────────────────
+
+class MedicationIn(BaseModel):
+    nome: str
+    principio_ativo: Optional[str] = None
+    concentracao: Optional[str] = None
+    apresentacao: str = "comprimido"
+    observacoes_gerais: Optional[str] = None
+    ativo: bool = True
+
+
+@app.get("/medications", tags=["medications"])
+async def list_medications(active_only: bool = False, _: dict[str, Any] = AdminAuth):
+    query = "SELECT * FROM medications"
+    if active_only:
+        query += " WHERE ativo = TRUE"
+    query += " ORDER BY nome"
+    return await fetch_all(query)
+
+
+@app.post("/medications", status_code=201, tags=["medications"])
+async def create_medication(body: MedicationIn, _: dict[str, Any] = AdminAuth):
+    ts = now()
+    return await fetch_one(
+        """
+        INSERT INTO medications (id, nome, principio_ativo, concentracao, apresentacao, observacoes_gerais, ativo, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (uid(), body.nome, body.principio_ativo, body.concentracao, body.apresentacao,
+         body.observacoes_gerais, body.ativo, ts, ts),
+    )
+
+
+@app.put("/medications/{id_}", tags=["medications"])
+async def update_medication(id_: str, body: MedicationIn, _: dict[str, Any] = AdminAuth):
+    row = await fetch_one(
+        """
+        UPDATE medications
+        SET nome = %s, principio_ativo = %s, concentracao = %s, apresentacao = %s,
+            observacoes_gerais = %s, ativo = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        (body.nome, body.principio_ativo, body.concentracao, body.apresentacao,
+         body.observacoes_gerais, body.ativo, now(), id_),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Medicamento nao encontrado")
+    return row
+
+
+# ── Prescrições ───────────────────────────────────────────────────────────────
+
+class PrescricaoIn(BaseModel):
+    idoso_id: str
+    medicamento_id: str
+    vigencia_inicio: str
+    vigencia_fim: Optional[str] = None
+    observacao_geral: Optional[str] = None
+    ativo: bool = True
+
+
+class HorarioPrescricaoIn(BaseModel):
+    faixa_horario: str
+    hora_exata: Optional[str] = None
+    dias_semana: list[int]
+    dose: str
+    observacao: Optional[str] = None
+    ordem: int = 0
+
+
+async def _expand_prescricao(p: dict[str, Any]) -> dict[str, Any]:
+    horarios = await fetch_all(
+        "SELECT * FROM horarios_prescricao WHERE prescricao_id = %s ORDER BY ordem, faixa_horario",
+        (p["id"],),
+    )
+    for h in horarios:
+        try:
+            h["dias_semana"] = _json.loads(h["dias_semana"])
+        except Exception:
+            h["dias_semana"] = [1, 2, 3, 4, 5, 6, 7]
+    med = await fetch_one(
+        "SELECT id, nome, concentracao, apresentacao FROM medications WHERE id = %s",
+        (p["medicamento_id"],),
+    )
+    return {**p, "medicamento": med, "horarios": horarios}
+
+
+@app.get("/prescricoes", tags=["prescricoes"])
+async def list_prescricoes(idoso_id: Optional[str] = None, _: dict[str, Any] = AdminAuth):
+    if idoso_id:
+        rows = await fetch_all(
+            "SELECT * FROM prescricoes WHERE idoso_id = %s ORDER BY vigencia_inicio DESC",
+            (idoso_id,),
+        )
+    else:
+        rows = await fetch_all("SELECT * FROM prescricoes ORDER BY vigencia_inicio DESC")
+    return [await _expand_prescricao(r) for r in rows]
+
+
+@app.post("/prescricoes", status_code=201, tags=["prescricoes"])
+async def create_prescricao(body: PrescricaoIn, _: dict[str, Any] = AdminAuth):
+    med = await fetch_one(
+        "SELECT id FROM medications WHERE id = %s AND ativo = TRUE", (body.medicamento_id,)
+    )
+    if not med:
+        raise HTTPException(status_code=400, detail="Medicamento inativo ou inexistente.")
+    elder = await fetch_one(
+        "SELECT id FROM elders WHERE id = %s AND active = TRUE", (body.idoso_id,)
+    )
+    if not elder:
+        raise HTTPException(status_code=400, detail="Idoso inativo ou inexistente.")
+    ts = now()
+    p = await fetch_one(
+        """
+        INSERT INTO prescricoes (id, idoso_id, medicamento_id, vigencia_inicio, vigencia_fim, observacao_geral, ativo, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (uid(), body.idoso_id, body.medicamento_id, body.vigencia_inicio,
+         body.vigencia_fim, body.observacao_geral, body.ativo, ts, ts),
+    )
+    return await _expand_prescricao(p)
+
+
+@app.put("/prescricoes/{id_}", tags=["prescricoes"])
+async def update_prescricao(id_: str, body: PrescricaoIn, _: dict[str, Any] = AdminAuth):
+    row = await fetch_one(
+        """
+        UPDATE prescricoes
+        SET idoso_id = %s, medicamento_id = %s, vigencia_inicio = %s, vigencia_fim = %s,
+            observacao_geral = %s, ativo = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        (body.idoso_id, body.medicamento_id, body.vigencia_inicio, body.vigencia_fim,
+         body.observacao_geral, body.ativo, now(), id_),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Prescricao nao encontrada")
+    return await _expand_prescricao(row)
+
+
+# ── Horários da Prescrição ────────────────────────────────────────────────────
+
+@app.post("/prescricoes/{prescricao_id}/horarios", status_code=201, tags=["prescricoes"])
+async def create_horario(prescricao_id: str, body: HorarioPrescricaoIn, _: dict[str, Any] = AdminAuth):
+    p = await fetch_one("SELECT id FROM prescricoes WHERE id = %s", (prescricao_id,))
+    if not p:
+        raise HTTPException(status_code=404, detail="Prescricao nao encontrada")
+    ts = now()
+    row = await fetch_one(
+        """
+        INSERT INTO horarios_prescricao (id, prescricao_id, faixa_horario, hora_exata, dias_semana, dose, observacao, ordem, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (uid(), prescricao_id, body.faixa_horario, body.hora_exata,
+         _json.dumps(body.dias_semana), body.dose, body.observacao, body.ordem, ts, ts),
+    )
+    row["dias_semana"] = body.dias_semana
+    return row
+
+
+@app.put("/horarios-prescricao/{id_}", tags=["prescricoes"])
+async def update_horario(id_: str, body: HorarioPrescricaoIn, _: dict[str, Any] = AdminAuth):
+    row = await fetch_one(
+        """
+        UPDATE horarios_prescricao
+        SET faixa_horario = %s, hora_exata = %s, dias_semana = %s, dose = %s,
+            observacao = %s, ordem = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        (body.faixa_horario, body.hora_exata, _json.dumps(body.dias_semana),
+         body.dose, body.observacao, body.ordem, now(), id_),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Horario nao encontrado")
+    row["dias_semana"] = body.dias_semana
+    return row
+
+
+@app.delete("/horarios-prescricao/{id_}", status_code=204, tags=["prescricoes"])
+async def delete_horario(id_: str, _: dict[str, Any] = AdminAuth):
+    await execute("DELETE FROM horarios_prescricao WHERE id = %s", (id_,))
+
+
+# ── Separação Semanal ─────────────────────────────────────────────────────────
+
+class GerarSeparacaoIn(BaseModel):
+    idoso_id: str
+    semana_inicio: str
+
+
+class SeparacaoStatusIn(BaseModel):
+    status: Literal["rascunho", "em_separacao", "fechado"]
+
+
+async def _expand_separacao(sep: dict[str, Any]) -> dict[str, Any]:
+    items = await fetch_all(
+        "SELECT * FROM itens_separacao WHERE separacao_id = %s ORDER BY faixa_horario, medicamento_nome",
+        (sep["id"],),
+    )
+    for item in items:
+        try:
+            item["dias_semana"] = _json.loads(item["dias_semana"])
+        except Exception:
+            item["dias_semana"] = [1, 2, 3, 4, 5, 6, 7]
+    elder = await fetch_one("SELECT id, name FROM elders WHERE id = %s", (sep["idoso_id"],))
+    return {**sep, "idoso": elder, "itens": items}
+
+
+@app.get("/separacoes-semanais", tags=["separacoes"])
+async def list_separacoes(idoso_id: Optional[str] = None, _: dict[str, Any] = AdminAuth):
+    if idoso_id:
+        rows = await fetch_all(
+            "SELECT * FROM separacoes_semanais WHERE idoso_id = %s ORDER BY semana_inicio DESC",
+            (idoso_id,),
+        )
+    else:
+        rows = await fetch_all(
+            "SELECT * FROM separacoes_semanais ORDER BY semana_inicio DESC, idoso_id"
+        )
+    return rows
+
+
+@app.get("/separacoes-semanais/lista-compra/consolidado", tags=["separacoes"])
+async def lista_compra(semana_inicio: Optional[str] = None, _: dict[str, Any] = AdminAuth):
+    conditions = ["i.falta_compra = TRUE"]
+    params: list[Any] = []
+    if semana_inicio:
+        conditions.append("s.semana_inicio = %s")
+        params.append(semana_inicio)
+    rows = await fetch_all(
+        f"""
+        SELECT
+            i.id,
+            i.medicamento_nome,
+            i.dose,
+            i.faixa_horario,
+            i.observacao_falta,
+            i.marcado_por,
+            i.marcado_em,
+            e.id AS idoso_id,
+            e.name AS idoso_nome,
+            s.semana_inicio,
+            s.semana_fim
+        FROM itens_separacao i
+        JOIN separacoes_semanais s ON s.id = i.separacao_id
+        JOIN elders e ON e.id = s.idoso_id
+        WHERE {' AND '.join(conditions)}
+        ORDER BY i.medicamento_nome, e.name
+        """,
+        tuple(params),
+    )
+    return {"items": rows}
+
+
+@app.get("/separacoes-semanais/{id_}", tags=["separacoes"])
+async def get_separacao(id_: str, _: dict[str, Any] = AdminAuth):
+    sep = await fetch_one("SELECT * FROM separacoes_semanais WHERE id = %s", (id_,))
+    if not sep:
+        raise HTTPException(status_code=404, detail="Separacao nao encontrada")
+    return await _expand_separacao(sep)
+
+
+@app.post("/separacoes-semanais/gerar", status_code=201, tags=["separacoes"])
+async def gerar_separacao(body: GerarSeparacaoIn, user: dict[str, Any] = AdminAuth):
+    elder = await fetch_one(
+        "SELECT id FROM elders WHERE id = %s AND active = TRUE", (body.idoso_id,)
+    )
+    if not elder:
+        raise HTTPException(status_code=400, detail="Idoso inativo ou inexistente.")
+
+    try:
+        d_inicio = _dt.date.fromisoformat(body.semana_inicio)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="semana_inicio invalida. Use YYYY-MM-DD.")
+    semana_fim = (d_inicio + _dt.timedelta(days=6)).isoformat()
+
+    existing = await fetch_one(
+        "SELECT id FROM separacoes_semanais WHERE idoso_id = %s AND semana_inicio = %s",
+        (body.idoso_id, body.semana_inicio),
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ja existe uma separacao para este idoso nesta semana. ID: {existing['id']}",
+        )
+
+    prescricoes = await fetch_all(
+        """
+        SELECT p.*, m.nome AS medicamento_nome
+        FROM prescricoes p
+        JOIN medications m ON m.id = p.medicamento_id
+        WHERE p.idoso_id = %s
+          AND p.ativo = TRUE
+          AND m.ativo = TRUE
+          AND p.vigencia_inicio <= %s
+          AND (p.vigencia_fim IS NULL OR p.vigencia_fim >= %s)
+        ORDER BY m.nome
+        """,
+        (body.idoso_id, semana_fim, body.semana_inicio),
+    )
+
+    ts = now()
+    sep_id = uid()
+    username = actor_username(user)
+    await execute(
+        """
+        INSERT INTO separacoes_semanais (id, idoso_id, semana_inicio, semana_fim, status, gerado_por, gerado_em, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, 'rascunho', %s, %s, %s, %s)
+        """,
+        (sep_id, body.idoso_id, body.semana_inicio, semana_fim, username, ts, ts, ts),
+    )
+
+    week_days = set(range(1, 8))
+    for p in prescricoes:
+        horarios = await fetch_all(
+            "SELECT * FROM horarios_prescricao WHERE prescricao_id = %s ORDER BY ordem",
+            (p["id"],),
+        )
+        for h in horarios:
+            try:
+                dias = set(_json.loads(h["dias_semana"]))
+            except Exception:
+                dias = week_days
+            if not dias.intersection(week_days):
+                continue
+            await execute(
+                """
+                INSERT INTO itens_separacao (
+                    id, separacao_id, horario_prescricao_id,
+                    medicamento_nome, faixa_horario, hora_exata, dose, dias_semana,
+                    observacao_prescricao, status, falta_compra, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pendente', FALSE, %s, %s)
+                """,
+                (
+                    uid(), sep_id, h["id"],
+                    p["medicamento_nome"], h["faixa_horario"], h["hora_exata"],
+                    h["dose"], h["dias_semana"], h.get("observacao"), ts, ts,
+                ),
+            )
+
+    sep = await fetch_one("SELECT * FROM separacoes_semanais WHERE id = %s", (sep_id,))
+    return await _expand_separacao(sep)
+
+
+@app.patch("/separacoes-semanais/{id_}/status", tags=["separacoes"])
+async def patch_separacao_status(id_: str, body: SeparacaoStatusIn, user: dict[str, Any] = AdminAuth):
+    sep = await fetch_one("SELECT * FROM separacoes_semanais WHERE id = %s", (id_,))
+    if not sep:
+        raise HTTPException(status_code=404, detail="Separacao nao encontrada")
+    username = actor_username(user)
+    ts = now()
+    fechado_por = username if body.status == "fechado" else sep.get("fechado_por")
+    fechado_em = ts if body.status == "fechado" else sep.get("fechado_em")
+    row = await fetch_one(
+        """
+        UPDATE separacoes_semanais
+        SET status = %s, fechado_por = %s, fechado_em = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        (body.status, fechado_por, fechado_em, ts, id_),
+    )
+    return await _expand_separacao(row)
+
+
+@app.delete("/separacoes-semanais/{id_}", status_code=204, tags=["separacoes"])
+async def delete_separacao(id_: str, _: dict[str, Any] = AdminAuth):
+    sep = await fetch_one("SELECT status FROM separacoes_semanais WHERE id = %s", (id_,))
+    if not sep:
+        raise HTTPException(status_code=404, detail="Separacao nao encontrada")
+    if sep["status"] != "rascunho":
+        raise HTTPException(status_code=400, detail="So e possivel deletar separacoes em rascunho.")
+    await execute("DELETE FROM separacoes_semanais WHERE id = %s", (id_,))
+
+
+# ── Itens da Separação ────────────────────────────────────────────────────────
+
+class ItemSeparacaoUpdate(BaseModel):
+    status: Optional[Literal["pendente", "separado", "conferido"]] = None
+    falta_compra: Optional[bool] = None
+    observacao_falta: Optional[str] = None
+    observacao_separacao: Optional[str] = None
+
+
+@app.patch("/itens-separacao/{id_}", tags=["separacoes"])
+async def patch_item_separacao(id_: str, body: ItemSeparacaoUpdate, user: dict[str, Any] = Auth):
+    item = await fetch_one(
+        """
+        SELECT i.*, s.status AS sep_status
+        FROM itens_separacao i
+        JOIN separacoes_semanais s ON s.id = i.separacao_id
+        WHERE i.id = %s
+        """,
+        (id_,),
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item nao encontrado")
+    if item["sep_status"] == "fechado" and user.get("role") != "admin":
+        raise HTTPException(status_code=400, detail="Separacao fechada. Somente admin pode editar.")
+
+    ts = now()
+    username = actor_username(user)
+    new_status = body.status if body.status is not None else item["status"]
+    new_falta = body.falta_compra if body.falta_compra is not None else item["falta_compra"]
+    new_obs_falta = body.observacao_falta if body.observacao_falta is not None else item["observacao_falta"]
+    new_obs_sep = body.observacao_separacao if body.observacao_separacao is not None else item["observacao_separacao"]
+    changed = body.status is not None or body.falta_compra is not None
+    marcado_por = username if changed else item["marcado_por"]
+    marcado_em = ts if changed else item["marcado_em"]
+
+    row = await fetch_one(
+        """
+        UPDATE itens_separacao
+        SET status = %s, falta_compra = %s, observacao_falta = %s, observacao_separacao = %s,
+            marcado_por = %s, marcado_em = %s, updated_at = %s
+        WHERE id = %s
+        RETURNING *
+        """,
+        (new_status, new_falta, new_obs_falta, new_obs_sep, marcado_por, marcado_em, ts, id_),
+    )
+    try:
+        row["dias_semana"] = _json.loads(row["dias_semana"])
+    except Exception:
+        row["dias_semana"] = [1, 2, 3, 4, 5, 6, 7]
+    return row
+
+
+# ── Portal da Cuidadora: separação da semana ──────────────────────────────────
+
+@app.get("/caregiver/separacoes", tags=["caregiver"])
+async def caregiver_separacoes(semana_inicio: Optional[str] = None, user: dict[str, Any] = CaregiverAuth):
+    params: list[Any] = []
+    if semana_inicio:
+        condition = "s.semana_inicio = %s AND s.status != 'rascunho'"
+        params.append(semana_inicio)
+    else:
+        condition = "s.status = 'em_separacao'"
+    rows = await fetch_all(
+        f"SELECT s.* FROM separacoes_semanais s WHERE {condition} ORDER BY s.semana_inicio DESC, s.idoso_id",
+        tuple(params),
+    )
+    return [await _expand_separacao(r) for r in rows]
+
+
 _fe = os.path.abspath(FRONTEND_DIR)
 if os.path.isdir(_fe):
     _assets = os.path.join(_fe, "assets")
@@ -2070,6 +2607,11 @@ if os.path.isdir(_fe):
         "caregiver/",
         "dashboard",
         "reports/",
+        "medications",
+        "prescricoes",
+        "horarios-prescricao",
+        "separacoes-semanais",
+        "itens-separacao",
         "docs",
         "openapi",
     )
