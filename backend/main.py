@@ -8,6 +8,7 @@ import asyncio
 import os
 import uuid
 from typing import Any, Literal, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import bcrypt
 from dotenv import load_dotenv
@@ -29,16 +30,27 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 
 
+DB_CONNECT_TIMEOUT = float(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "5"))
+DB_POOL_TIMEOUT = float(os.getenv("DB_POOL_TIMEOUT_SECONDS", "10"))
+
+
+def with_connect_timeout(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.setdefault("connect_timeout", str(int(DB_CONNECT_TIMEOUT)))
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
 def get_database_url() -> str:
     for env_name in (
+        "DATABASE_URL_UNPOOLED",
+        "POSTGRES_URL_NON_POOLING",
         "DATABASE_URL",
         "POSTGRES_URL",
-        "POSTGRES_URL_NON_POOLING",
-        "DATABASE_URL_UNPOOLED",
     ):
         value = os.getenv(env_name)
         if value:
-            return value
+            return with_connect_timeout(value)
     raise RuntimeError(
         "Database URL not configured. Set DATABASE_URL or POSTGRES_URL in the environment."
     )
@@ -206,6 +218,8 @@ async def ensure_db_pool() -> AsyncConnectionPool:
                     min_size=DB_POOL_MIN_SIZE,
                     max_size=DB_POOL_MAX_SIZE,
                     open=False,
+                    timeout=DB_POOL_TIMEOUT,
+                    reconnect_timeout=DB_CONNECT_TIMEOUT,
                     kwargs={
                         "autocommit": True,
                         "row_factory": dict_row,
@@ -273,9 +287,16 @@ async def startup() -> None:
 
 @app.get("/health", tags=["health"])
 async def health():
+    database_connected = False
+    if database_env_is_configured():
+        try:
+            database_connected = (await fetch_value("SELECT 1 AS ok")) == 1
+        except Exception:
+            database_connected = False
     return {
         "status": "ok",
         "database_configured": database_env_is_configured(),
+        "database_connected": database_connected,
         "users_configured": users_are_configured(),
     }
 

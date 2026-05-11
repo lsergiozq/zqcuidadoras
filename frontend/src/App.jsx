@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, createContext, useContext } 
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "/api");
+const API_TIMEOUT_MS = 15000;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
@@ -64,6 +65,21 @@ const readErrorMessage = async (response, fallback) => {
 };
 
 const ensureApiSuccess = async (response, fallback) => {
+
+const fetchWithTimeout = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Tempo limite ao carregar dados da API. Verifique a conexao com o banco na Vercel.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
   if (response.status === 401) {
     clearSession();
     throw new Error(await readErrorMessage(response, "Sessão expirada. Entre novamente."));
@@ -77,32 +93,32 @@ const ensureApiSuccess = async (response, fallback) => {
 const api = {
   login: async (username, password) => {
     const form = new URLSearchParams({ username, password });
-    const r = await fetch(`${API}/auth/login`, { method:"POST", body: form });
+    const r = await fetchWithTimeout(`${API}/auth/login`, { method:"POST", body: form });
     await ensureApiSuccess(r, "Usuário ou senha incorretos");
     return r.json();
   },
   get: async (path) => {
-    const r = await fetch(`${API}${path}`, { headers: authHeaders() });
+    const r = await fetchWithTimeout(`${API}${path}`, { headers: authHeaders() });
     await ensureApiSuccess(r, "Não foi possível carregar os dados.");
     return r.json();
   },
   post: async (path, body) => {
-    const r = await fetch(`${API}${path}`, { method:"POST", headers: authHeaders(), body: JSON.stringify(body) });
+    const r = await fetchWithTimeout(`${API}${path}`, { method:"POST", headers: authHeaders(), body: JSON.stringify(body) });
     await ensureApiSuccess(r, "Não foi possível salvar os dados.");
     return r.json();
   },
   put: async (path, body) => {
-    const r = await fetch(`${API}${path}`, { method:"PUT", headers: authHeaders(), body: JSON.stringify(body) });
+    const r = await fetchWithTimeout(`${API}${path}`, { method:"PUT", headers: authHeaders(), body: JSON.stringify(body) });
     await ensureApiSuccess(r, "Não foi possível atualizar os dados.");
     return r.json();
   },
   patch: async (path, body) => {
-    const r = await fetch(`${API}${path}`, { method:"PATCH", headers: authHeaders(), body: JSON.stringify(body) });
+    const r = await fetchWithTimeout(`${API}${path}`, { method:"PATCH", headers: authHeaders(), body: JSON.stringify(body) });
     await ensureApiSuccess(r, "Não foi possível atualizar os dados.");
     return r.json();
   },
   delete: async (path) => {
-    const r = await fetch(`${API}${path}`, { method:"DELETE", headers: authHeaders() });
+    const r = await fetchWithTimeout(`${API}${path}`, { method:"DELETE", headers: authHeaders() });
     await ensureApiSuccess(r, "Não foi possível remover os dados.");
   },
 };
