@@ -3,7 +3,7 @@
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "functions": {
-    "api/**/*.py": {
+    "api/index.py": {
       "excludeFiles": "{frontend/**,backend/*.db,backend/__pycache__/**}"
     }
   },
