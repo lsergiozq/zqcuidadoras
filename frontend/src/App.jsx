@@ -64,8 +64,6 @@ const readErrorMessage = async (response, fallback) => {
   return fallback;
 };
 
-const ensureApiSuccess = async (response, fallback) => {
-
 const fetchWithTimeout = async (url, options = {}) => {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -80,6 +78,8 @@ const fetchWithTimeout = async (url, options = {}) => {
     window.clearTimeout(timeoutId);
   }
 };
+
+const ensureApiSuccess = async (response, fallback) => {
   if (response.status === 401) {
     clearSession();
     throw new Error(await readErrorMessage(response, "Sessão expirada. Entre novamente."));
