@@ -2,7 +2,7 @@
 
 **Controle financeiro para famílias que contratam cuidadoras.**
 
-ZQCuidadoras é um aplicativo web gratuito e de código aberto para registrar plantões, cobranças avulsas e acompanhar o fechamento semanal e mensal de pagamentos de cuidadoras. Ideal para quem cuida de um familiar e precisa de organização simples, sem planilhas complicadas.
+ZQCuidadoras é um aplicativo web gratuito e de código aberto para registrar plantões, cobranças avulsas e acompanhar o fechamento semanal e mensal de pagamentos de cuidadoras. A aplicação agora usa **Postgres compatível com Vercel/Neon**, sem dependência de SQLite no runtime.
 
 > **100% gratuito.** Sem assinatura, sem limite de uso, sem anúncios.
 
@@ -17,7 +17,7 @@ Quem contrata cuidadoras informalmente lida com:
 - Dificuldade em saber o total da semana ou do mês por cuidadora
 - Controle de quem já foi pago e quem ainda está pendente
 
-O ZQCuidadoras resolve isso com um painel simples, um calendário visual e relatórios de fechamento — tudo salvo localmente no seu servidor, sem enviar dados para terceiros.
+O ZQCuidadoras resolve isso com um painel simples, um calendário visual e relatórios de fechamento, agora preparado para rodar na Vercel com backend FastAPI e Postgres.
 
 ---
 
@@ -30,28 +30,32 @@ O ZQCuidadoras resolve isso com um painel simples, um calendário visual e relat
 - **Calendário mensal** — visualização com detalhe por dia
 - **Fechamento semanal** — plantões + avulsos separados, com botão de marcar como pago
 - **Fechamento mensal** — quebra por tipo de plantão + avulsos por cuidadora
-- **Controle de pagamento** — marcar individual ou em lote
-- **Banco SQLite** — persistência local, sem dependência de nuvem externa
+- **Controle de pagamento** — marcar individualmente ou em lote
+- **Banco Postgres** — persistência compatível com deploy serverless na Vercel
 
 ---
 
 ## 🗂️ Estrutura do projeto
 
-```
+```text
 ZQCuidadoras/
+├── api/
+│   └── index.py                         ← Entry point ASGI da Vercel
 ├── backend/
-│   ├── main.py              ← API FastAPI + SQLite
-│   ├── requirements.txt     ← Dependências Python
-│   ├── .env.example         ← Modelo de configuração
-│   └── zqcuidadoras.db      ← Banco SQLite (criado automaticamente)
+│   ├── main.py                          ← API FastAPI + Postgres
+│   ├── migrate_sqlite_to_postgres.py    ← Migração dos dados legados
+│   ├── requirements.txt                 ← Dependências Python locais
+│   └── .env.example                     ← Modelo de configuração
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx          ← Aplicação React completa
-│   │   └── main.jsx         ← Entry point
+│   │   ├── App.jsx                      ← Aplicação React
+│   │   └── main.jsx                     ← Entry point do frontend
 │   ├── index.html
 │   ├── package.json
 │   └── vite.config.js
-├── DEPLOY.md                ← Guia de deploy em VPS
+├── requirements.txt                     ← Dependências Python da Vercel
+├── vercel.json                          ← Build do frontend + routing SPA
+├── DEPLOY.md                            ← Guia de deploy na Vercel
 └── README.md
 ```
 
@@ -65,6 +69,7 @@ ZQCuidadoras/
 | pip        | qualquer      | `pip --version`     |
 | Node.js    | 18+           | `node --version`    |
 | npm        | 8+            | `npm --version`     |
+| Postgres   | 14+           | conexão via URL     |
 
 ---
 
@@ -77,7 +82,26 @@ git clone https://github.com/seu-usuario/ZQCuidadoras.git
 cd ZQCuidadoras
 ```
 
-### 2. Backend (abra um terminal)
+### 2. Configure o backend
+
+Copie o exemplo de ambiente:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Edite `backend/.env` com a URL do seu Postgres local ou do banco provisionado para a Vercel:
+
+```env
+SECRET_KEY=cole-aqui-uma-chave-forte
+TOKEN_EXPIRE_HOURS=12
+USERS=ana:SuaSenhaForte1,joao:OutraSenha2
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+```
+
+> Se a integração da Vercel/Neon já injeta `POSTGRES_URL`, o backend também aceita essa variável automaticamente.
+
+### 3. Suba o backend
 
 ```bash
 cd backend
@@ -88,7 +112,9 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 O backend sobe em **http://localhost:8000**  
 Documentação interativa da API: **http://localhost:8000/docs**
 
-### 3. Frontend (abra outro terminal)
+### 4. Suba o frontend
+
+Em outro terminal:
 
 ```bash
 cd frontend
@@ -96,47 +122,37 @@ npm install
 npm run dev
 ```
 
-O app abre em **http://localhost:3000**
+O app abre em **http://localhost:3000**.
+
+No modo de desenvolvimento, o frontend usa `http://localhost:8000`. Em produção, o build usa `/api` automaticamente, compatível com a Vercel.
 
 ---
 
-## ⚙️ Configuração
+## 🔁 Migrar dados legados do SQLite
 
-Copie o arquivo de exemplo e ajuste as variáveis:
+Se você já tem dados em um banco SQLite antigo, rode a migração antes do deploy final:
 
 ```bash
-cp backend/.env.example backend/.env
+cd backend
+python migrate_sqlite_to_postgres.py --replace
 ```
 
-Edite o `backend/.env`:
+O script procura automaticamente por:
 
-```env
-# Chave secreta para autenticação — gere uma forte:
-# python3 -c "import secrets; print(secrets.token_hex(32))"
-SECRET_KEY=cole-aqui-a-chave-gerada
+- `backend/cuidarcontrol.db`
+- `backend/zqcuidadoras.db`
 
-# Tempo de expiração do token de login (em horas)
-TOKEN_EXPIRE_HOURS=12
+Se o arquivo estiver em outro local:
 
-# Usuários do sistema — formato: usuario:senha,usuario2:senha2
-USERS=ana:SuaSenhaForte1,joao:OutraSenha2
-
-# Caminho do banco SQLite (opcional — padrão: pasta backend/)
-# DB_PATH=/var/www/zqcuidadoras/backend/zqcuidadoras.db
-
-# Pasta do frontend compilado (opcional — para servir via backend em produção)
-# FRONTEND_DIR=/var/www/zqcuidadoras/frontend/dist
+```bash
+python migrate_sqlite_to_postgres.py --sqlite-path /caminho/para/seu.db --replace
 ```
-
-> O banco de dados `zqcuidadoras.db` é criado automaticamente na pasta `backend/` na primeira execução.
 
 ---
 
 ## 🗄️ Banco de dados
 
-O SQLite é utilizado para armazenamento local — sem necessidade de configurar um servidor de banco de dados externo. O arquivo pode ser aberto com o [DB Browser for SQLite](https://sqlitebrowser.org/).
-
-### Tabelas
+O backend usa Postgres com criação automática de schema no startup. As tabelas principais continuam as mesmas:
 
 | Tabela          | Descrição                             |
 |-----------------|---------------------------------------|
@@ -144,57 +160,66 @@ O SQLite é utilizado para armazenamento local — sem necessidade de configurar
 | `shifts`        | Plantões (diurno, noturno, 24h)       |
 | `extra_charges` | Cobranças avulsas (aplicações, etc.)  |
 
-### Backup
+Variáveis aceitas pelo backend:
 
-Para fazer backup dos dados, basta copiar o arquivo:
-
-```bash
-cp backend/zqcuidadoras.db backup/zqcuidadoras-$(date +%Y%m%d).db
-```
+- `DATABASE_URL`
+- `POSTGRES_URL`
+- `POSTGRES_URL_NON_POOLING`
+- `DATABASE_URL_UNPOOLED`
+- `DB_POOL_MIN_SIZE`
+- `DB_POOL_MAX_SIZE`
 
 ---
 
 ## 🌐 API — Principais endpoints
 
 ### Cuidadoras
-```
-GET    /caregivers          → Lista todas
-POST   /caregivers          → Cria nova
-PUT    /caregivers/{id}     → Atualiza
+
+```text
+GET    /caregivers
+POST   /caregivers
+PUT    /caregivers/{id}
 ```
 
 ### Plantões
-```
-GET    /shifts              → Lista (filtros: ?month=2025-05&caregiver_id=...)
-POST   /shifts              → Cria
-PUT    /shifts/{id}         → Atualiza
-PATCH  /shifts/{id}/payment → Atualiza status de pagamento
-DELETE /shifts/{id}         → Remove
+
+```text
+GET    /shifts
+POST   /shifts
+PUT    /shifts/{id}
+PATCH  /shifts/{id}/payment
+DELETE /shifts/{id}
 ```
 
-### Cobranças Avulsas
-```
-GET    /extra-charges              → Lista (filtros: ?month=2025-05&caregiver_id=...)
-POST   /extra-charges              → Cria
-PUT    /extra-charges/{id}         → Atualiza
-PATCH  /extra-charges/{id}/payment → Atualiza status de pagamento
-DELETE /extra-charges/{id}         → Remove
+### Cobranças avulsas
+
+```text
+GET    /extra-charges
+POST   /extra-charges
+PUT    /extra-charges/{id}
+PATCH  /extra-charges/{id}/payment
+DELETE /extra-charges/{id}
 ```
 
 ### Dashboard
+
+```text
+GET /dashboard?today=2025-05-10&week_start=2025-05-05&week_end=2025-05-11&month=2025-05
 ```
-GET    /dashboard?today=2025-05-10&week_start=2025-05-05&week_end=2025-05-11&month=2025-05
-```
+
+Na Vercel, essas rotas ficam acessíveis sob o prefixo `/api`.
 
 ---
 
-## ☁️ Deploy em servidor (VPS)
+## ☁️ Deploy na Vercel
 
-Consulte o guia completo em [`DEPLOY.md`](./DEPLOY.md) para instruções de deploy com:
+Consulte [DEPLOY.md](./DEPLOY.md) para o passo a passo completo com:
 
-- **Systemd** para manter o backend sempre ativo
-- **Nginx** como proxy reverso
-- **HTTPS gratuito** via Let's Encrypt
+- integração Postgres via Marketplace/Neon
+- variáveis de ambiente do backend
+- build do frontend Vite
+- deploy do monorepo com `api/index.py`
+- migração dos dados legados do SQLite
 
 ---
 
@@ -204,11 +229,9 @@ Consulte o guia completo em [`DEPLOY.md`](./DEPLOY.md) para instruções de depl
 - [ ] Notificações de pagamentos pendentes
 - [ ] Suporte a múltiplos pacientes/famílias
 - [ ] App mobile (PWA)
-- [ ] Migração opcional para PostgreSQL
 
 ---
 
 ## 📄 Licença
 
-Este projeto é **gratuito e de código aberto**, distribuído sob a licença [MIT](LICENSE).  
-Pode ser usado, modificado e distribuído livremente.
+Este projeto é gratuito e de código aberto, distribuído sob a licença MIT.

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, createContext, useContext } from "react";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "/api");
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);

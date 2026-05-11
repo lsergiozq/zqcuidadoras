@@ -1,238 +1,166 @@
-# Deploy ZQCuidadoras no VPS
+# Deploy ZQCuidadoras na Vercel
 
-## O que vai rodar no servidor
+## Visao geral
 
-- Backend Python (FastAPI) servindo a API **e** os arquivos estáticos do frontend
-- Nginx como proxy reverso (HTTPS, porta 80/443)
-- Systemd mantendo o backend vivo automaticamente
+O projeto foi refatorado para rodar assim:
 
----
+- **Frontend Vite** publicado como site estatico na Vercel
+- **Backend FastAPI** publicado como Function Python via `api/index.py`
+- **Postgres** externo conectado via Vercel Marketplace, normalmente Neon
 
-## 1. Enviar arquivos para o VPS
-
-No seu computador (PowerShell):
-
-```powershell
-# Substitua usuario@ip pelo seu VPS
-scp -r C:\Git\Cuidadoras\zqcuidadoras usuario@SEU_IP:/var/www/
-```
-
-Ou use FileZilla / WinSCP se preferir interface gráfica.
+O runtime nao depende mais de SQLite.
 
 ---
 
-## 2. No VPS — instalar dependências
+## 1. Provisionar o Postgres na Vercel
 
-```bash
-ssh usuario@SEU_IP
+A Vercel nao cria mais um produto proprio chamado "Vercel Postgres" para novos projetos. O caminho atual e usar uma integracao Postgres no Marketplace, normalmente **Neon**.
 
-# Instalar Python 3 e pip (se não tiver)
-sudo apt update && sudo apt install -y python3 python3-pip nginx
+Passos:
 
-# Instalar dependências do app
-cd /var/www/zqcuidadoras/backend
-pip3 install -r requirements.txt
-```
+1. Abra seu projeto na Vercel.
+2. Entre em **Storage** ou **Marketplace**.
+3. Adicione uma integracao Postgres.
+4. Conclua o provisionamento.
 
----
+Depois disso, a Vercel injeta variaveis como:
 
-## 3. Buildar o frontend
+- `POSTGRES_URL`
+- `POSTGRES_URL_NON_POOLING`
+- `POSTGRES_USER`
+- `POSTGRES_HOST`
+- `POSTGRES_DATABASE`
 
-No seu **computador Windows** (precisa do Node instalado):
+O backend ja foi preparado para aceitar automaticamente:
 
-```powershell
-cd C:\Git\Cuidadoras\zqcuidadoras\frontend
-npm install
-npm run build
-```
-
-Isso gera a pasta `frontend/dist/`. Envie ela para o VPS:
-
-```powershell
-scp -r C:\Git\Cuidadoras\zqcuidadoras\frontend\dist usuario@SEU_IP:/var/www/zqcuidadoras/frontend/
-```
+- `DATABASE_URL`
+- `POSTGRES_URL`
+- `POSTGRES_URL_NON_POOLING`
+- `DATABASE_URL_UNPOOLED`
 
 ---
 
-## 4. Configurar o .env no VPS
+## 2. Configurar variaveis de ambiente
 
-```bash
-cd /var/www/zqcuidadoras/backend
-cp .env.example .env
-nano .env
-```
-
-Edite o arquivo `.env`:
+Defina no projeto da Vercel:
 
 ```env
-# Gere uma chave forte:
-# python3 -c "import secrets; print(secrets.token_hex(32))"
-SECRET_KEY=cole-aqui-a-chave-gerada
-
+SECRET_KEY=gere-uma-chave-forte
 TOKEN_EXPIRE_HOURS=12
-
-# Seus usuários — troque as senhas!
 USERS=ana:SuaSenhaForte1,joao:OutraSenha2
+DB_POOL_MIN_SIZE=1
+DB_POOL_MAX_SIZE=5
+```
 
-DB_PATH=/var/www/zqcuidadoras/backend/zqcuidadoras.db
-FRONTEND_DIR=/var/www/zqcuidadoras/frontend/dist
+Se a integracao do banco estiver conectada, normalmente **nao** e preciso definir `DATABASE_URL` manualmente.
+
+Se preferir configurar a URL manualmente:
+
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
 ```
 
 ---
 
-## 5. Criar serviço systemd
+## 3. Migrar dados antigos do SQLite
+
+Se voce ja tem dados locais no SQLite legado, importe antes ou logo apos o primeiro deploy.
+
+No projeto local:
 
 ```bash
-sudo nano /etc/systemd/system/zqcuidadoras.service
+cd backend
+pip install -r requirements.txt
+python migrate_sqlite_to_postgres.py --replace
 ```
 
-Cole o conteúdo abaixo (ajuste o usuário se necessário):
+O script procura automaticamente por:
 
-```ini
-[Unit]
-Description=ZQCuidadoras Backend
-After=network.target
+- `backend/cuidarcontrol.db`
+- `backend/zqcuidadoras.db`
 
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/var/www/zqcuidadoras/backend
-ExecStart=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Ativar e iniciar:
+Se o arquivo estiver em outro caminho:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable zqcuidadoras
-sudo systemctl start zqcuidadoras
+python migrate_sqlite_to_postgres.py --sqlite-path /caminho/para/seu.db --replace
+```
 
-# Verificar se está rodando:
-sudo systemctl status zqcuidadoras
+O backend cria o schema automaticamente no Postgres antes de importar os dados.
+
+---
+
+## 4. Como a Vercel vai publicar o projeto
+
+O repositorio ja contem os arquivos necessarios:
+
+- `vercel.json` define o build do frontend e o fallback da SPA
+- `api/index.py` expoe o app FastAPI como Function Python
+- `requirements.txt` na raiz informa as dependencias Python da Function
+
+Com isso, o comportamento em producao fica:
+
+- Frontend servido na raiz do dominio
+- API servida em `/api/...`
+- Frontend chamando `/api` automaticamente no build de producao
+
+---
+
+## 5. Deploy pela interface da Vercel
+
+1. Conecte o repositorio GitHub/GitLab/Bitbucket ao projeto.
+2. Use a raiz do repositorio como Root Directory.
+3. Confirme as variaveis de ambiente.
+4. Inicie o deploy.
+
+Nao e necessario subir servidor separado, Nginx ou systemd.
+
+---
+
+## 6. Deploy com Vercel CLI
+
+Na raiz do projeto:
+
+```bash
+vercel
+```
+
+Para publicar em producao:
+
+```bash
+vercel --prod
 ```
 
 ---
 
-## 6. Configurar Nginx
+## 7. Validacao apos deploy
 
-```bash
-sudo nano /etc/nginx/sites-available/zqcuidadoras
+Confira os endpoints abaixo no dominio gerado pela Vercel:
+
+```text
+https://seu-projeto.vercel.app/
+https://seu-projeto.vercel.app/api/docs
+https://seu-projeto.vercel.app/api/auth/me
 ```
 
-**Sem HTTPS (mais simples, HTTP):**
-
-```nginx
-server {
-    listen 80;
-    server_name SEU_IP_OU_DOMINIO;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 60s;
-    }
-}
-```
-
-**Com HTTPS (recomendado se tiver domínio):**
-
-```nginx
-server {
-    listen 80;
-    server_name seudominio.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name seudominio.com;
-
-    ssl_certificate     /etc/letsencrypt/live/seudominio.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/seudominio.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 60s;
-    }
-}
-```
-
-Ativar o site:
-
-```bash
-sudo ln -s /etc/nginx/sites-available/zqcuidadoras /etc/nginx/sites-enabled/
-sudo nginx -t          # testar configuração
-sudo systemctl reload nginx
-```
-
-**Para gerar certificado HTTPS gratuito (Let's Encrypt):**
-
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d seudominio.com
-```
+Se `api/docs` abrir e o login funcionar, o backend esta respondendo corretamente.
 
 ---
 
-## 7. Ajustar permissões do banco
+## 8. Observacoes operacionais
 
-```bash
-sudo chown www-data:www-data /var/www/zqcuidadoras/backend
-sudo chmod 755 /var/www/zqcuidadoras/backend
-```
-
----
-
-## 8. Testar
-
-Acesse no navegador: `http://SEU_IP` ou `https://seudominio.com`
-
-Login padrão (mude no .env!):
-- Usuário: `ana`
-- Senha: conforme definido no .env
+- O pool do backend foi configurado para trabalhar com URLs Postgres da Vercel/Neon.
+- O driver foi trocado para `psycopg` com pool assincrono.
+- O backend desabilita prepared statements no pool para reduzir atrito com URLs pooladas.
+- O schema e criado automaticamente no startup da API.
 
 ---
 
-## Atualizar o app no futuro
+## 9. Atualizar no futuro
+
+Depois de novas alteracoes no codigo:
 
 ```bash
-# 1. No Windows — fazer o build novo
-cd C:\Git\Cuidadoras\zqcuidadoras\frontend
-npm run build
-
-# 2. Enviar para o VPS
-scp -r frontend\dist usuario@SEU_IP:/var/www/zqcuidadoras/frontend/
-
-# Se mudou o backend:
-scp backend\main.py usuario@SEU_IP:/var/www/zqcuidadoras/backend/
-ssh usuario@SEU_IP "sudo systemctl restart zqcuidadoras"
+git push
 ```
 
----
-
-## Backup do banco de dados
-
-```bash
-# No VPS — fazer backup
-cp /var/www/zqcuidadoras/backend/zqcuidadoras.db /var/backups/zqcuidadoras-$(date +%Y%m%d).db
-
-# Ou baixar para o Windows
-scp usuario@SEU_IP:/var/www/zqcuidadoras/backend/zqcuidadoras.db C:\Git\Cuidadoras\backup\
-```
-
-Recomendo criar um cron diário:
-
-```bash
-sudo crontab -e
-# Adicionar linha:
-0 3 * * * cp /var/www/zqcuidadoras/backend/zqcuidadoras.db /var/backups/zqcuidadoras-$(date +\%Y\%m\%d).db
-```
+A Vercel fara novo build automaticamente no branch conectado.
