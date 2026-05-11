@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../app/api";
 import { G, css, fmt, useMobile } from "../app/shared";
 import { ErrorBanner, Field, Modal } from "../components/ui";
@@ -32,6 +32,16 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
     };
   };
 
+  const createAdminForm = (admin = null) => ({
+    username: admin?.username || "",
+    display_name: admin?.display_name || "",
+    password: "",
+    active: admin?.active ?? true,
+    is_bootstrap: admin?.is_bootstrap ?? false,
+  });
+
+  const sortAdmins = (items) => [...items].sort((left, right) => left.username.localeCompare(right.username));
+
   const [showCaregiverModal, setShowCaregiverModal] = useState(false);
   const [editingCaregiver, setEditingCaregiver] = useState(null);
   const [caregiverForm, setCaregiverForm] = useState(createCaregiverForm());
@@ -41,6 +51,27 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
   const [showServiceTypeModal, setShowServiceTypeModal] = useState(false);
   const [editingServiceType, setEditingServiceType] = useState(null);
   const [serviceTypeForm, setServiceTypeForm] = useState({ name: "", code: "", requires_elder: false, requires_glucose: false, requires_period: false, active: true });
+  const [admins, setAdmins] = useState([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [editingAdmin, setEditingAdmin] = useState(null);
+  const [adminForm, setAdminForm] = useState(createAdminForm());
+
+  const loadAdmins = async () => {
+    setAdminsLoading(true);
+    try {
+      const adminList = await api.get("/users");
+      setAdmins(sortAdmins(adminList));
+    } catch (loadError) {
+      setError(loadError.message || "Erro ao carregar admins.");
+    } finally {
+      setAdminsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAdmins();
+  }, []);
 
   const openCaregiver = (caregiver = null) => {
     setEditingCaregiver(caregiver?.id || null);
@@ -81,6 +112,20 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
     setShowServiceTypeModal(false);
     setEditingServiceType(null);
     setServiceTypeForm({ name: "", code: "", requires_elder: false, requires_glucose: false, requires_period: false, active: true });
+    setError("");
+  };
+
+  const openAdmin = (admin = null) => {
+    setEditingAdmin(admin?.id || null);
+    setAdminForm(createAdminForm(admin));
+    setShowAdminModal(true);
+    setError("");
+  };
+
+  const closeAdmin = () => {
+    setShowAdminModal(false);
+    setEditingAdmin(null);
+    setAdminForm(createAdminForm());
     setError("");
   };
 
@@ -131,8 +176,8 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
 
       setCaregivers(editingCaregiver ? caregivers.map((caregiver) => caregiver.id === saved.id ? saved : caregiver) : [...caregivers, saved]);
       closeCaregiver();
-    } catch (error) {
-      setError(error.message || "Erro ao salvar cuidadora.");
+    } catch (saveError) {
+      setError(saveError.message || "Erro ao salvar cuidadora.");
     }
   };
 
@@ -157,8 +202,8 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
       const saved = editingElder ? await api.put(`/elders/${editingElder}`, elderForm) : await api.post("/elders", elderForm);
       setElders(editingElder ? elders.map((elder) => elder.id === saved.id ? saved : elder) : [...elders, saved]);
       closeElder();
-    } catch (error) {
-      setError(error.message || "Erro ao salvar idoso.");
+    } catch (saveError) {
+      setError(saveError.message || "Erro ao salvar idoso.");
     }
   };
 
@@ -176,8 +221,43 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
       const saved = editingServiceType ? await api.put(`/service-types/${editingServiceType}`, payload) : await api.post("/service-types", payload);
       setServiceTypes(editingServiceType ? serviceTypes.map((item) => item.id === saved.id ? saved : item) : [...serviceTypes, saved]);
       closeServiceType();
-    } catch (error) {
-      setError(error.message || "Erro ao salvar tipo de serviço.");
+    } catch (saveError) {
+      setError(saveError.message || "Erro ao salvar tipo de serviço.");
+    }
+  };
+
+  const saveAdmin = async () => {
+    const username = adminForm.username.trim().toLowerCase();
+    if (!username) return setError("Informe o username do admin.");
+    if (!editingAdmin && !adminForm.password) return setError("Informe uma senha para criar o admin.");
+    try {
+      const payload = {
+        username,
+        display_name: adminForm.display_name || username,
+        password: adminForm.password || null,
+        active: adminForm.active,
+      };
+      const saved = editingAdmin ? await api.put(`/users/${editingAdmin}`, payload) : await api.post("/users", payload);
+      setAdmins((current) => sortAdmins(editingAdmin ? current.map((admin) => admin.id === saved.id ? saved : admin) : [...current, saved]));
+      closeAdmin();
+    } catch (saveError) {
+      setError(saveError.message || "Erro ao salvar admin.");
+    }
+  };
+
+  const toggleAdmin = async (admin) => {
+    const actionLabel = admin.active ? "desativar" : "ativar";
+    if (!confirm(`Deseja ${actionLabel} o admin ${admin.username}?`)) return;
+    try {
+      const saved = await api.put(`/users/${admin.id}`, {
+        username: admin.username,
+        display_name: admin.display_name,
+        password: null,
+        active: !admin.active,
+      });
+      setAdmins((current) => sortAdmins(current.map((item) => item.id === saved.id ? saved : item)));
+    } catch (saveError) {
+      setError(saveError.message || "Erro ao atualizar admin.");
     }
   };
 
@@ -187,6 +267,7 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
         <button style={{ ...css.btn(section === "caregivers" ? G.accent : G.inputBorder), padding: "8px 14px" }} onClick={() => setSection("caregivers")}>Cuidadoras</button>
         <button style={{ ...css.btn(section === "elders" ? G.teal : G.inputBorder), padding: "8px 14px" }} onClick={() => setSection("elders")}>Idosos</button>
         <button style={{ ...css.btn(section === "serviceTypes" ? G.purple : G.inputBorder), padding: "8px 14px" }} onClick={() => setSection("serviceTypes")}>Tipos de Serviço</button>
+        <button style={{ ...css.btn(section === "admins" ? G.green : G.inputBorder), padding: "8px 14px" }} onClick={() => setSection("admins")}>Admins</button>
       </div>
 
       {section === "caregivers" && (
@@ -253,6 +334,36 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
         </div>
       )}
 
+      {section === "admins" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+            <h1 style={{ ...css.h1, margin: 0 }}>🔐 Administradores</h1>
+            <button style={{ ...css.btn(G.green), marginLeft: "auto", fontSize: isMobile ? 13 : 14, padding: isMobile ? "8px 14px" : "10px 20px" }} onClick={() => openAdmin()}>+ Novo Admin</button>
+          </div>
+          <div style={{ ...css.card, marginBottom: 16, padding: 16, color: G.muted, fontSize: 13 }}>
+            Admins marcados como Bootstrap vieram da configuração inicial do ambiente. O username deles permanece travado aqui para evitar duplicidade numa nova inicialização.
+          </div>
+          <div style={{ ...css.card, overflowX: "auto" }}>
+            <table style={css.table}>
+              <thead><tr>{["Usuário", "Nome", "Origem", "Status", "Ações"].map((label) => <th key={label} style={css.th}>{label}</th>)}</tr></thead>
+              <tbody>
+                {adminsLoading && <tr><td colSpan={5} style={{ ...css.td, color: G.muted, textAlign: "center", padding: 32 }}>Carregando admins...</td></tr>}
+                {!adminsLoading && admins.length === 0 && <tr><td colSpan={5} style={{ ...css.td, color: G.muted, textAlign: "center", padding: 32 }}>Nenhum admin cadastrado</td></tr>}
+                {!adminsLoading && admins.map((admin) => (
+                  <tr key={admin.id}>
+                    <td style={css.td}><strong>{admin.username}</strong>{admin.is_current && <div style={{ fontSize: 12, color: G.muted }}>Sessão atual</div>}</td>
+                    <td style={css.td}>{admin.display_name}</td>
+                    <td style={css.td}><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{admin.is_bootstrap && <span style={css.badge(G.purple)}>Bootstrap</span>}{!admin.is_bootstrap && <span style={css.badge(G.accent)}>Frontend</span>}{admin.is_current && <span style={css.badge(G.teal)}>Você</span>}</div></td>
+                    <td style={css.td}><span style={css.badge(admin.active ? G.green : G.red)}>{admin.active ? "Ativo" : "Inativo"}</span></td>
+                    <td style={css.td}><button style={{ ...css.btnSm(G.accent), marginRight: 6 }} onClick={() => openAdmin(admin)}>Editar</button><button style={css.btnSm(admin.active ? G.red : G.green)} onClick={() => toggleAdmin(admin)} disabled={admin.is_current}>{admin.active ? "Desativar" : "Ativar"}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {showCaregiverModal && (
         <Modal title={editingCaregiver ? "Editar Cuidadora" : "Nova Cuidadora"} onClose={closeCaregiver} wide>
           <ErrorBanner msg={error} />
@@ -287,6 +398,20 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
             {serviceTypes.map((serviceType) => <div key={serviceType.id} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,2fr) minmax(180px,1fr)", gap: 12, alignItems: "center", marginBottom: 12 }}><div><div style={{ fontWeight: 600 }}>{serviceType.name}</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>{serviceType.requires_elder && <span style={css.badge(G.accent)}>Precisa idoso</span>}{serviceType.requires_glucose && <span style={css.badge(G.teal)}>Pede glicose</span>}{serviceType.requires_period && <span style={css.badge(G.purple)}>Pede período</span>}</div></div><input type="number" style={css.input} value={caregiverForm.service_rates[serviceType.id] ?? ""} onChange={(event) => setCaregiverForm({ ...caregiverForm, service_rates: { ...caregiverForm.service_rates, [serviceType.id]: event.target.value } })} placeholder="Valor" /></div>)}
           </div>
           <div style={{ display: "flex", gap: 10 }}><button style={css.btn()} onClick={saveCaregiver}>Salvar</button><button style={css.btnGhost} onClick={closeCaregiver}>Cancelar</button></div>
+        </Modal>
+      )}
+
+      {showAdminModal && (
+        <Modal title={editingAdmin ? "Editar Admin" : "Novo Admin"} onClose={closeAdmin}>
+          <ErrorBanner msg={error} />
+          <div style={css.grid(isMobile ? 1 : 2)}>
+            <Field label="Username *"><input style={css.input} value={adminForm.username} disabled={Boolean(editingAdmin && adminForm.is_bootstrap)} onChange={(event) => setAdminForm({ ...adminForm, username: event.target.value.toLowerCase() })} placeholder="nome em lowercase" /></Field>
+            <Field label="Nome Exibido"><input style={css.input} value={adminForm.display_name} onChange={(event) => setAdminForm({ ...adminForm, display_name: event.target.value })} /></Field>
+          </div>
+          {editingAdmin && adminForm.is_bootstrap && <div style={{ ...css.card, padding: 14, marginBottom: 16, color: G.muted, fontSize: 13 }}>Este admin veio do bootstrap inicial. O username fica travado para evitar recriação duplicada na próxima inicialização.</div>}
+          <Field label={editingAdmin ? "Nova Senha (opcional)" : "Senha *"}><input type="password" style={css.input} value={adminForm.password} onChange={(event) => setAdminForm({ ...adminForm, password: event.target.value })} placeholder={editingAdmin ? "Preencha só para trocar" : "Obrigatória ao criar admin"} /></Field>
+          <Field label="Status"><select style={css.select} value={adminForm.active ? "true" : "false"} onChange={(event) => setAdminForm({ ...adminForm, active: event.target.value === "true" })}><option value="true">Ativo</option><option value="false">Inativo</option></select></Field>
+          <div style={{ display: "flex", gap: 10 }}><button style={css.btn(G.green)} onClick={saveAdmin}>Salvar</button><button style={css.btnGhost} onClick={closeAdmin}>Cancelar</button></div>
         </Modal>
       )}
 

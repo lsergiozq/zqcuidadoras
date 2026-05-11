@@ -117,6 +117,36 @@ async def get_user_by_username(username: str) -> Optional[dict[str, Any]]:
     )
 
 
+def is_bootstrap_user(username: str) -> bool:
+    return normalize_username(username) in BOOTSTRAP_USERS
+
+
+async def get_admin_user_by_id(id_: str) -> Optional[dict[str, Any]]:
+    return await fetch_one(
+        """
+        SELECT id, username, display_name, active, role, caregiver_id, created_at, updated_at
+        FROM users
+        WHERE id = %s AND role = 'admin' AND caregiver_id IS NULL
+        """,
+        (id_,),
+    )
+
+
+def serialize_admin_user(user: dict[str, Any], current_user_id: Optional[str] = None) -> dict[str, Any]:
+    username = normalize_username(user["username"])
+    return {
+        "id": user["id"],
+        "username": username,
+        "display_name": user["display_name"],
+        "active": bool(user["active"]),
+        "role": "admin",
+        "is_bootstrap": is_bootstrap_user(username),
+        "is_current": current_user_id == user["id"],
+        "created_at": user.get("created_at"),
+        "updated_at": user.get("updated_at"),
+    }
+
+
 async def users_are_configured() -> bool:
     if not database_env_is_configured():
         return bool(BOOTSTRAP_USERS)
@@ -672,7 +702,6 @@ async def init_db() -> None:
                         (username,),
                     )
                     existing_user = await cur.fetchone()
-                    password_hash = hash_password(password)
                     if existing_user is None:
                         await cur.execute(
                             """
@@ -687,22 +716,10 @@ async def init_db() -> None:
                                 uid(),
                                 username,
                                 username,
-                                password_hash,
+                                hash_password(password),
                                 timestamp,
                                 timestamp,
                             ),
-                        )
-                        continue
-                    if existing_user["role"] == "admin" and existing_user["caregiver_id"] is None:
-                        await cur.execute(
-                            """
-                            UPDATE users
-                            SET password_hash = %s,
-                                active = TRUE,
-                                updated_at = %s
-                            WHERE id = %s
-                            """,
-                            (password_hash, timestamp, existing_user["id"]),
                         )
 
 
@@ -781,6 +798,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
 @app.get("/auth/me", tags=["auth"])
 async def me(user: dict[str, Any] = Auth):
     return {
+        "id": user["id"],
         "username": user["username"],
         "display_name": user["display_name"],
         "role": user["role"],
@@ -810,6 +828,13 @@ class CaregiverServiceRatesPayload(BaseModel):
 
 
 class CaregiverLoginIn(BaseModel):
+    username: str
+    display_name: Optional[str] = None
+    password: Optional[str] = None
+    active: bool = True
+
+
+class AdminUserIn(BaseModel):
     username: str
     display_name: Optional[str] = None
     password: Optional[str] = None
@@ -885,6 +910,118 @@ class CaregiverExtraHourStartIn(BaseModel):
 
 class CaregiverExtraHourStopIn(BaseModel):
     end_time: str
+
+
+@app.get("/users", tags=["users"])
+async def list_admin_users(user: dict[str, Any] = AdminAuth):
+    rows = await fetch_all(
+        """
+        SELECT id, username, display_name, active, role, caregiver_id, created_at, updated_at
+        FROM users
+        WHERE role = 'admin' AND caregiver_id IS NULL
+        ORDER BY username
+        """
+    )
+    return [serialize_admin_user(row, user["id"]) for row in rows]
+
+
+@app.post("/users", tags=["users"])
+async def create_admin_user(body: AdminUserIn, user: dict[str, Any] = AdminAuth):
+    username = normalize_username(body.username)
+    if not username:
+        raise HTTPException(status_code=400, detail="Informe um username valido.")
+    if not body.password:
+        raise HTTPException(status_code=400, detail="Informe uma senha para criar o admin.")
+    conflict = await fetch_one("SELECT id FROM users WHERE username = %s", (username,))
+    if conflict:
+        raise HTTPException(status_code=400, detail="Este username ja esta em uso.")
+
+    display_name = (body.display_name or username).strip() or username
+    timestamp = now()
+    user_id = uid()
+    await execute(
+        """
+        INSERT INTO users (
+            id, username, display_name, password_hash, role,
+            caregiver_id, active, created_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, 'admin', NULL, %s, %s, %s)
+        """,
+        (
+            user_id,
+            username,
+            display_name,
+            hash_password(body.password),
+            body.active,
+            timestamp,
+            timestamp,
+        ),
+    )
+    created = await get_admin_user_by_id(user_id)
+    return serialize_admin_user(created, user["id"])
+
+
+@app.put("/users/{id_}", tags=["users"])
+async def update_admin_user(id_: str, body: AdminUserIn, user: dict[str, Any] = AdminAuth):
+    existing_user = await get_admin_user_by_id(id_)
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="Admin nao encontrado.")
+
+    current_username = normalize_username(existing_user["username"])
+    username = normalize_username(body.username)
+    if not username:
+        raise HTTPException(status_code=400, detail="Informe um username valido.")
+    if existing_user["id"] == user["id"] and username != current_username:
+        raise HTTPException(status_code=400, detail="Nao altere o proprio username enquanto estiver logado.")
+    if existing_user["id"] == user["id"] and not body.active:
+        raise HTTPException(status_code=400, detail="Voce nao pode desativar o proprio acesso.")
+    if is_bootstrap_user(current_username) and username != current_username:
+        raise HTTPException(status_code=400, detail="Usuarios bootstrap devem manter o username definido no ambiente.")
+
+    conflict = await fetch_one(
+        "SELECT id FROM users WHERE username = %s AND id <> %s",
+        (username, id_),
+    )
+    if conflict:
+        raise HTTPException(status_code=400, detail="Este username ja esta em uso.")
+
+    display_name = (body.display_name or username).strip() or username
+    timestamp = now()
+    if body.password:
+        await execute(
+            """
+            UPDATE users
+            SET username = %s,
+                display_name = %s,
+                password_hash = %s,
+                active = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                username,
+                display_name,
+                hash_password(body.password),
+                body.active,
+                timestamp,
+                id_,
+            ),
+        )
+    else:
+        await execute(
+            """
+            UPDATE users
+            SET username = %s,
+                display_name = %s,
+                active = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (username, display_name, body.active, timestamp, id_),
+        )
+
+    updated_user = await get_admin_user_by_id(id_)
+    return serialize_admin_user(updated_user, user["id"])
 
 
 @app.get("/caregivers", tags=["caregivers"])
