@@ -84,7 +84,7 @@ export default function ReportsPage({ caregivers, elders }) {
     popup.print();
   };
 
-  const measurementRows = measurementReport.items.map((item) => [fmtDate(item.charge_date), item.elder_name || "—", item.caregiver_name || "—", item.service_type_name || item.description || "—", item.measurement_period || "—", item.glucose_value ?? "—", fmt(item.value)]);
+  const measurementRows = measurementReport.items.map((item) => [fmtDate(item.charge_date), item.elder_name || "—", item.caregiver_name || "—", item.service_type_name || item.description || "—", item.measurement_period || "—", item.glucose_value ?? "—"]);
   const paymentSummaryRows = paymentReport.summary.map((item) => [item.caregiver_name, item.pix_key || "—", fmt(item.total)]);
   const paymentItemRows = paymentReport.items.map((item) => [fmtDate(item.event_date), item.caregiver_name, item.label || item.source, fmt(item.value)]);
 
@@ -98,10 +98,10 @@ export default function ReportsPage({ caregivers, elders }) {
       <div style={{ ...css.grid(isMobile ? 1 : 2), marginBottom: 16 }}>
         <div style={css.card}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-            <h2 style={{ ...css.h2, margin: 0 }}>Medições por Idoso</h2>
+            <h2 style={{ ...css.h2, margin: 0 }}>Relatório por Idoso</h2>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button style={css.btnSm(G.teal)} onClick={() => downloadCsv("relatorio-medicoes.csv", ["Data", "Idoso", "Cuidadora", "Serviço", "Período", "Glicose", "Valor"], measurementRows)}>CSV</button>
-              <button style={css.btnSm(G.accent)} onClick={() => printTable("Relatório de Medições", ["Data", "Idoso", "Cuidadora", "Serviço", "Período", "Glicose", "Valor"], measurementRows)}>Imprimir</button>
+              <button style={css.btnSm(G.teal)} onClick={() => downloadCsv("relatorio-idosos.csv", ["Data", "Idoso", "Cuidadora", "Serviço", "Período", "Glicose"], measurementRows)}>CSV</button>
+              <button style={css.btnSm(G.accent)} onClick={() => printTable("Relatório por Idoso", ["Data", "Idoso", "Cuidadora", "Serviço", "Período", "Glicose"], measurementRows)}>Imprimir</button>
             </div>
           </div>
           <div style={css.grid(isMobile ? 1 : 3)}>
@@ -111,10 +111,10 @@ export default function ReportsPage({ caregivers, elders }) {
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={css.table}>
-              <thead><tr>{["Data", "Idoso", "Cuidadora", "Serviço", "Período", "Glicose", "Valor"].map((label) => <th key={label} style={css.th}>{label}</th>)}</tr></thead>
+              <thead><tr>{["Data", "Idoso", "Cuidadora", "Serviço", "Período", "Glicose"].map((label) => <th key={label} style={css.th}>{label}</th>)}</tr></thead>
               <tbody>
-                {measurementReport.items.length === 0 && <tr><td colSpan={7} style={{ ...css.td, color: G.muted, textAlign: "center", padding: 24 }}>Nenhuma medição encontrada</td></tr>}
-                {measurementReport.items.map((item) => <tr key={item.id}><td style={css.td}>{fmtDate(item.charge_date)}</td><td style={css.td}>{item.elder_name || "—"}</td><td style={css.td}>{item.caregiver_name || "—"}</td><td style={css.td}>{item.service_type_name || item.description || "—"}</td><td style={css.td}>{item.measurement_period || "—"}</td><td style={css.td}>{item.glucose_value ?? "—"}</td><td style={css.td}>{fmt(item.value)}</td></tr>)}
+                {measurementReport.items.length === 0 && <tr><td colSpan={6} style={{ ...css.td, color: G.muted, textAlign: "center", padding: 24 }}>Nenhum lançamento por idoso encontrado</td></tr>}
+                {measurementReport.items.map((item) => <tr key={item.id}><td style={css.td}>{fmtDate(item.charge_date)}</td><td style={css.td}>{item.elder_name || "—"}</td><td style={css.td}>{item.caregiver_name || "—"}</td><td style={css.td}>{item.service_type_name || item.description || "—"}</td><td style={css.td}>{item.measurement_period || "—"}</td><td style={css.td}>{item.glucose_value ?? "—"}</td></tr>)}
               </tbody>
             </table>
           </div>

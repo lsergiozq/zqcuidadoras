@@ -3,6 +3,13 @@ import { api } from "../app/api";
 import { G, css, currentTimeHHmm, fmt, fmtDate, MEASUREMENT_PERIOD_OPTIONS, shiftColor, shiftIcon, shiftLabel, today, useMobile } from "../app/shared";
 import { ErrorBanner, Field, StatCard } from "../components/ui";
 
+const CAREGIVER_PORTAL_NAV = [
+  { id: "dash", label: "Home", icon: "🏠", color: G.accent },
+  { id: "shift", label: "Plantão", icon: "📋", color: G.accent },
+  { id: "service", label: "Medição/Aplicação", icon: "🩺", color: G.teal },
+  { id: "hour", label: "Hora Avulsa", icon: "🕒", color: G.purple },
+];
+
 function CaregiverShiftForm({ onSaved }) {
   const [form, setForm] = useState({ shift_date: today(), shift_type: "Day12h", notes: "" });
   const [saving, setSaving] = useState(false);
@@ -24,7 +31,7 @@ function CaregiverShiftForm({ onSaved }) {
 
   return (
     <div style={css.card}>
-      <h2 style={css.h2}>1. Lançar Plantão</h2>
+      <h2 style={css.h2}>Plantão</h2>
       <ErrorBanner msg={error} />
       <Field label="Data"><input type="date" style={css.input} value={form.shift_date} onChange={(event) => setForm({ ...form, shift_date: event.target.value })} /></Field>
       <Field label="Tipo de Plantão">
@@ -69,7 +76,7 @@ function CaregiverServiceForm({ elders, serviceTypes, onSaved }) {
 
   return (
     <div style={css.card}>
-      <h2 style={css.h2}>2. Lançar Serviços Avulsos</h2>
+      <h2 style={css.h2}>Medição/Aplicação</h2>
       <ErrorBanner msg={error} />
       <Field label="Data"><input type="date" style={css.input} value={form.charge_date} onChange={(event) => setForm({ ...form, charge_date: event.target.value })} /></Field>
       <Field label="Tipo de Serviço"><select style={css.select} value={form.service_type_id} onChange={(event) => setForm({ ...form, service_type_id: event.target.value })}><option value="">Selecione...</option>{serviceTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
@@ -122,7 +129,7 @@ function CaregiverExtraHourCard({ openExtraHour, onSaved }) {
 
   return (
     <div style={css.card}>
-      <h2 style={css.h2}>3. Lançar Hora Avulsa</h2>
+      <h2 style={css.h2}>Hora Avulsa</h2>
       <ErrorBanner msg={error} />
       {openExtraHour ? (
         <div>
@@ -150,6 +157,7 @@ export default function CaregiverPortalPage({ session, dashboard, elders, servic
     ...(dashboard?.pending_shifts || []).map((item) => ({ ...item, item_type: "shift", item_date: item.shift_date })),
     ...(dashboard?.pending_extras || []).map((item) => ({ ...item, item_type: item.entry_type || "custom", item_date: item.charge_date })),
   ].sort((a, b) => (b.item_date || "").localeCompare(a.item_date || ""));
+  const mainStyle = isMobile ? { ...css.mainMobile, paddingBottom: 98 } : { ...css.main, paddingBottom: 110 };
 
   if (loading) return <div style={{ ...css.page, alignItems: "center", justifyContent: "center", color: G.muted }}>⏳ Carregando...</div>;
 
@@ -162,15 +170,8 @@ export default function CaregiverPortalPage({ session, dashboard, elders, servic
           <button onClick={onLogout} style={{ ...css.btnSm(G.red) }}>Sair</button>
         </div>
       </div>
-      <main style={isMobile ? css.mainMobile : css.main}>
+      <main style={mainStyle}>
         {error && <ErrorBanner msg={error} />}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-          <button style={{ ...css.btn(panel === "dash" ? G.accent : G.inputBorder), padding: "8px 14px" }} onClick={() => setPanel("dash")}>Dashboard</button>
-          <button style={{ ...css.btn(panel === "shift" ? G.accent : G.inputBorder), padding: "8px 14px" }} onClick={() => setPanel("shift")}>1. Plantão</button>
-          <button style={{ ...css.btn(panel === "service" ? G.teal : G.inputBorder), padding: "8px 14px" }} onClick={() => setPanel("service")}>2. Serviço Avulso</button>
-          <button style={{ ...css.btn(panel === "hour" ? G.purple : G.inputBorder), padding: "8px 14px" }} onClick={() => setPanel("hour")}>3. Hora Avulsa</button>
-        </div>
-
         {panel === "dash" && (
           <div>
             <h1 style={css.h1}>Dashboard da Cuidadora</h1>
@@ -198,6 +199,38 @@ export default function CaregiverPortalPage({ session, dashboard, elders, servic
         {panel === "service" && <CaregiverServiceForm elders={elders} serviceTypes={serviceTypes} onSaved={reload} />}
         {panel === "hour" && <CaregiverExtraHourCard openExtraHour={dashboard?.open_extra_hour} onSaved={reload} />}
       </main>
+      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, background: G.card, borderTop: `1px solid ${G.cardBorder}`, padding: isMobile ? "6px 8px calc(6px + env(safe-area-inset-bottom))" : "8px 16px", zIndex: 90 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, width: "100%", maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
+          {CAREGIVER_PORTAL_NAV.map((item) => {
+            const active = panel === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setPanel(item.id)}
+                style={{
+                  border: active ? `1px solid ${item.color}` : `1px solid ${G.cardBorder}`,
+                  borderRadius: 12,
+                  padding: isMobile ? "10px 6px" : "12px 8px",
+                  background: active ? item.color : G.input,
+                  color: active ? "#fff" : G.text,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 4,
+                  minHeight: isMobile ? 60 : 66,
+                  cursor: "pointer",
+                  boxShadow: active ? `0 0 0 2px ${item.color}33, 0 12px 24px ${item.color}22` : "none",
+                  transition: "background 120ms ease, box-shadow 120ms ease, border-color 120ms ease",
+                }}
+              >
+                <span style={{ fontSize: isMobile ? 17 : 20, lineHeight: 1 }}>{item.icon}</span>
+                <span style={{ fontSize: isMobile ? 9 : 12, fontWeight: 700, lineHeight: 1.15, textAlign: "center", letterSpacing: isMobile ? "0" : "0.1px" }}>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1933,7 +1933,7 @@ async def measurement_report(
     elder_id: Optional[str] = None,
     _: dict[str, Any] = AdminAuth,
 ):
-    conditions = ["ec.glucose_value IS NOT NULL"]
+    conditions = ["ec.entry_type = 'service'", "ec.elder_id IS NOT NULL"]
     params: list[Any] = []
     if start_date:
         conditions.append("ec.charge_date >= %s")
