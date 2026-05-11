@@ -162,28 +162,56 @@ SCHEMA_STATEMENTS = [
 _pool_lock = asyncio.Lock()
 
 
+def database_env_is_configured() -> bool:
+    return any(
+        os.getenv(env_name)
+        for env_name in (
+            "DATABASE_URL",
+            "POSTGRES_URL",
+            "POSTGRES_URL_NON_POOLING",
+            "DATABASE_URL_UNPOOLED",
+        )
+    )
+
+
+def database_not_available(detail: str) -> HTTPException:
+    return HTTPException(status_code=503, detail=detail)
+
+
 async def ensure_db_pool() -> AsyncConnectionPool:
     db_pool = getattr(app.state, "db_pool", None)
     if db_pool is not None:
         return db_pool
 
+    if not database_env_is_configured():
+        raise database_not_available(
+            "Banco de dados nao configurado. Defina DATABASE_URL ou POSTGRES_URL na Vercel."
+        )
+
     async with _pool_lock:
         db_pool = getattr(app.state, "db_pool", None)
         if db_pool is None:
-            db_pool = AsyncConnectionPool(
-                conninfo=get_database_url(),
-                min_size=DB_POOL_MIN_SIZE,
-                max_size=DB_POOL_MAX_SIZE,
-                open=False,
-                kwargs={
-                    "autocommit": True,
-                    "row_factory": dict_row,
-                    "prepare_threshold": None,
-                },
-            )
-            await db_pool.open()
-            app.state.db_pool = db_pool
-            await init_db()
+            try:
+                db_pool = AsyncConnectionPool(
+                    conninfo=get_database_url(),
+                    min_size=DB_POOL_MIN_SIZE,
+                    max_size=DB_POOL_MAX_SIZE,
+                    open=False,
+                    kwargs={
+                        "autocommit": True,
+                        "row_factory": dict_row,
+                        "prepare_threshold": None,
+                    },
+                )
+                await db_pool.open()
+                app.state.db_pool = db_pool
+                await init_db()
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise database_not_available(
+                    "Falha ao conectar no Postgres configurado. Verifique as variaveis da Vercel e o banco provisionado."
+                ) from exc
     return db_pool
 
 
@@ -232,7 +260,14 @@ async def init_db() -> None:
 @app.on_event("startup")
 async def startup() -> None:
     _hash_users()
-    await ensure_db_pool()
+
+
+@app.get("/health", tags=["health"])
+async def health():
+    return {
+        "status": "ok",
+        "database_configured": database_env_is_configured(),
+    }
 
 
 @app.on_event("shutdown")
