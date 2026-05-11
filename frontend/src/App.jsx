@@ -34,11 +34,18 @@ function useIsMobile() {
 }
 
 // ─── Auth token storage ───────────────────────────────────────────────────────
+const AUTH_CHANGED_EVENT = "zq-auth-changed";
+
+const emitAuthChanged = () => window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 const getToken  = () => localStorage.getItem("cc_token");
-const setToken  = (t) => localStorage.setItem("cc_token", t);
-const clearToken= () => localStorage.removeItem("cc_token");
+const setToken  = (t) => { localStorage.setItem("cc_token", t); emitAuthChanged(); };
 const getUser   = () => localStorage.getItem("cc_user");
-const setUser   = (u) => localStorage.setItem("cc_user", u);
+const setUser   = (u) => { localStorage.setItem("cc_user", u); emitAuthChanged(); };
+const clearSession = () => {
+  localStorage.removeItem("cc_token");
+  localStorage.removeItem("cc_user");
+  emitAuthChanged();
+};
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const authHeaders = () => ({ "Content-Type":"application/json", "Authorization":`Bearer ${getToken()}` });
@@ -56,36 +63,47 @@ const readErrorMessage = async (response, fallback) => {
   return fallback;
 };
 
+const ensureApiSuccess = async (response, fallback) => {
+  if (response.status === 401) {
+    clearSession();
+    throw new Error(await readErrorMessage(response, "Sessão expirada. Entre novamente."));
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, fallback));
+  }
+  return response;
+};
+
 const api = {
   login: async (username, password) => {
     const form = new URLSearchParams({ username, password });
     const r = await fetch(`${API}/auth/login`, { method:"POST", body: form });
-    if (!r.ok) throw new Error(await readErrorMessage(r, "Usuário ou senha incorretos"));
+    await ensureApiSuccess(r, "Usuário ou senha incorretos");
     return r.json();
   },
   get: async (path) => {
     const r = await fetch(`${API}${path}`, { headers: authHeaders() });
-    if (r.status === 401) { clearToken(); window.location.reload(); }
+    await ensureApiSuccess(r, "Não foi possível carregar os dados.");
     return r.json();
   },
   post: async (path, body) => {
     const r = await fetch(`${API}${path}`, { method:"POST", headers: authHeaders(), body: JSON.stringify(body) });
-    if (r.status === 401) { clearToken(); window.location.reload(); }
+    await ensureApiSuccess(r, "Não foi possível salvar os dados.");
     return r.json();
   },
   put: async (path, body) => {
     const r = await fetch(`${API}${path}`, { method:"PUT", headers: authHeaders(), body: JSON.stringify(body) });
-    if (r.status === 401) { clearToken(); window.location.reload(); }
+    await ensureApiSuccess(r, "Não foi possível atualizar os dados.");
     return r.json();
   },
   patch: async (path, body) => {
     const r = await fetch(`${API}${path}`, { method:"PATCH", headers: authHeaders(), body: JSON.stringify(body) });
-    if (r.status === 401) { clearToken(); window.location.reload(); }
+    await ensureApiSuccess(r, "Não foi possível atualizar os dados.");
     return r.json();
   },
   delete: async (path) => {
     const r = await fetch(`${API}${path}`, { method:"DELETE", headers: authHeaders() });
-    if (r.status === 401) { clearToken(); window.location.reload(); }
+    await ensureApiSuccess(r, "Não foi possível remover os dados.");
   },
 };
 
@@ -205,7 +223,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── useData hook ─────────────────────────────────────────────────────────────
-function useData() {
+function useData(enabled) {
   const [caregivers, setCaregivers] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [extras, setExtras] = useState([]);
@@ -213,6 +231,11 @@ function useData() {
   const [error, setError] = useState("");
 
   const loadAll = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false);
+      setError("");
+      return;
+    }
     try {
       setError("");
       const [cgs, shs, exs] = await Promise.all([
@@ -222,11 +245,19 @@ function useData() {
       ]);
       setCaregivers(cgs); setShifts(shs); setExtras(exs);
     } catch(e) {
-      setError("Não foi possível conectar ao servidor.");
+      setError(e?.message || "Não foi possível conectar ao servidor.");
     } finally { setLoading(false); }
-  }, []);
+  }, [enabled]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      setError("");
+      return;
+    }
+    setLoading(true);
+    loadAll();
+  }, [enabled, loadAll]);
   return { caregivers, setCaregivers, shifts, setShifts, extras, setExtras, loading, error };
 }
 
@@ -902,11 +933,18 @@ export default function App() {
   const isMobile = useIsMobile();
   const [tab,setTab] = useState("dash");
   const [loggedUser,setLoggedUser] = useState(getUser);
-  const { caregivers,setCaregivers,shifts,setShifts,extras,setExtras,loading,error } = useData();
+  const isAuthenticated = Boolean(loggedUser && getToken());
+  const { caregivers,setCaregivers,shifts,setShifts,extras,setExtras,loading,error } = useData(isAuthenticated);
 
-  const logout = () => { clearToken(); localStorage.removeItem("cc_user"); setLoggedUser(null); };
+  useEffect(() => {
+    const syncAuth = () => setLoggedUser(getUser());
+    window.addEventListener(AUTH_CHANGED_EVENT, syncAuth);
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, syncAuth);
+  }, []);
 
-  if (!loggedUser || !getToken()) {
+  const logout = () => { clearSession(); setLoggedUser(null); };
+
+  if (!isAuthenticated) {
     return (
       <MobileCtx.Provider value={isMobile}>
         <LoginScreen onLogin={(u) => { setLoggedUser(u); }} />
