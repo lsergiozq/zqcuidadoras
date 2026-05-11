@@ -56,7 +56,7 @@ FRONTEND_DIR = os.getenv(
 DB_POOL_MIN_SIZE = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
 DB_POOL_MAX_SIZE = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
 
-_raw_users = os.getenv("USERS", "admin:admin123")
+_raw_users = os.getenv("USERS", "").strip()
 USERS: dict[str, str] = {}
 for pair in _raw_users.split(","):
     parts = pair.strip().split(":", 1)
@@ -77,6 +77,10 @@ def verify_user(username: str, password: str) -> bool:
         _hash_users()
     hashed_password = _hashed.get(username)
     return bool(hashed_password and bcrypt.checkpw(password.encode(), hashed_password))
+
+
+def users_are_configured() -> bool:
+    return bool(USERS)
 
 
 def create_token(username: str) -> str:
@@ -272,6 +276,7 @@ async def health():
     return {
         "status": "ok",
         "database_configured": database_env_is_configured(),
+        "users_configured": users_are_configured(),
     }
 
 
@@ -298,6 +303,11 @@ class TokenResponse(BaseModel):
 
 @app.post("/auth/login", response_model=TokenResponse, tags=["auth"])
 async def login(form: OAuth2PasswordRequestForm = Depends()):
+    if not users_are_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Usuarios nao configurados. Defina USERS nas variaveis de ambiente da Vercel e faca um novo deploy.",
+        )
     if not verify_user(form.username, form.password):
         raise HTTPException(status_code=400, detail="Usuario ou senha incorretos")
     return {

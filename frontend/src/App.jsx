@@ -43,11 +43,24 @@ const setUser   = (u) => localStorage.setItem("cc_user", u);
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const authHeaders = () => ({ "Content-Type":"application/json", "Authorization":`Bearer ${getToken()}` });
 
+const readErrorMessage = async (response, fallback) => {
+  try {
+    const data = await response.json();
+    if (typeof data?.detail === "string" && data.detail.trim()) return data.detail;
+    if (typeof data?.message === "string" && data.message.trim()) return data.message;
+  } catch {}
+  try {
+    const text = await response.text();
+    if (text.trim()) return text;
+  } catch {}
+  return fallback;
+};
+
 const api = {
   login: async (username, password) => {
     const form = new URLSearchParams({ username, password });
     const r = await fetch(`${API}/auth/login`, { method:"POST", body: form });
-    if (!r.ok) throw new Error("Usuário ou senha incorretos");
+    if (!r.ok) throw new Error(await readErrorMessage(r, "Usuário ou senha incorretos"));
     return r.json();
   },
   get: async (path) => {
