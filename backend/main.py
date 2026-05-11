@@ -21,7 +21,12 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
-load_dotenv()
+BACKEND_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(BACKEND_DIR, ".."))
+
+# Load the project env first and let backend/.env override it when present.
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 
 
 def get_database_url() -> str:
@@ -46,7 +51,7 @@ ALGORITHM = "HS256"
 TOKEN_EXPIRE = int(os.getenv("TOKEN_EXPIRE_HOURS", "12"))
 FRONTEND_DIR = os.getenv(
     "FRONTEND_DIR",
-    os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"),
+    os.path.join(BACKEND_DIR, "..", "frontend", "dist"),
 )
 DB_POOL_MIN_SIZE = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
 DB_POOL_MAX_SIZE = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
