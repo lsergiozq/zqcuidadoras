@@ -662,10 +662,18 @@ async def init_db() -> None:
                     ),
                 )
             if BOOTSTRAP_USERS:
-                await cur.execute("SELECT COUNT(*) AS total FROM users")
-                total_row = await cur.fetchone()
-                if total_row and not total_row["total"]:
-                    for username, password in BOOTSTRAP_USERS.items():
+                for username, password in BOOTSTRAP_USERS.items():
+                    await cur.execute(
+                        """
+                        SELECT id, role, caregiver_id
+                        FROM users
+                        WHERE username = %s
+                        """,
+                        (username,),
+                    )
+                    existing_user = await cur.fetchone()
+                    password_hash = hash_password(password)
+                    if existing_user is None:
                         await cur.execute(
                             """
                             INSERT INTO users (
@@ -679,10 +687,22 @@ async def init_db() -> None:
                                 uid(),
                                 username,
                                 username,
-                                hash_password(password),
+                                password_hash,
                                 timestamp,
                                 timestamp,
                             ),
+                        )
+                        continue
+                    if existing_user["role"] == "admin" and existing_user["caregiver_id"] is None:
+                        await cur.execute(
+                            """
+                            UPDATE users
+                            SET password_hash = %s,
+                                active = TRUE,
+                                updated_at = %s
+                            WHERE id = %s
+                            """,
+                            (password_hash, timestamp, existing_user["id"]),
                         )
 
 
