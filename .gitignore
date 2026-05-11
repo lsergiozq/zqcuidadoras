@@ -1,0 +1,26 @@
+# ─── Frontend ────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ─── Backend ─────────────────────────────────────────────
+backend/__pycache__/
+backend/*.pyc
+backend/*.db          # banco SQLite com dados reais
+backend/.env          # segredos — use .env.example como referência
+.env
+
+# ─── Python geral ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+
+# ─── OS / Editores ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
