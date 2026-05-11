@@ -7,6 +7,7 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
   const isMobile = useMobile();
   const [section, setSection] = useState("caregivers");
   const [error, setError] = useState("");
+  const activeServiceTypes = serviceTypes.filter((serviceType) => serviceType.active);
 
   const createCaregiverForm = (caregiver = null) => {
     const serviceRates = {};
@@ -394,8 +395,8 @@ export default function CatalogsPage({ caregivers, setCaregivers, elders, setEld
           </div>
           <div style={{ ...css.card, padding: 16, marginBottom: 16 }}>
             <h2 style={{ ...css.h2, marginBottom: 10 }}>Valores por Tipo de Serviço</h2>
-            {serviceTypes.length === 0 && <div style={{ color: G.muted, fontSize: 13 }}>Cadastre tipos de serviço antes de definir valores.</div>}
-            {serviceTypes.map((serviceType) => <div key={serviceType.id} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,2fr) minmax(180px,1fr)", gap: 12, alignItems: "center", marginBottom: 12 }}><div><div style={{ fontWeight: 600 }}>{serviceType.name}</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>{serviceType.requires_elder && <span style={css.badge(G.accent)}>Precisa idoso</span>}{serviceType.requires_glucose && <span style={css.badge(G.teal)}>Pede glicose</span>}{serviceType.requires_period && <span style={css.badge(G.purple)}>Pede período</span>}</div></div><input type="number" style={css.input} value={caregiverForm.service_rates[serviceType.id] ?? ""} onChange={(event) => setCaregiverForm({ ...caregiverForm, service_rates: { ...caregiverForm.service_rates, [serviceType.id]: event.target.value } })} placeholder="Valor" /></div>)}
+            {activeServiceTypes.length === 0 && <div style={{ color: G.muted, fontSize: 13 }}>Cadastre tipos de serviço ativos antes de definir valores.</div>}
+            {activeServiceTypes.map((serviceType) => <div key={serviceType.id} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,2fr) minmax(180px,1fr)", gap: 12, alignItems: "center", marginBottom: 12 }}><div><div style={{ fontWeight: 600 }}>{serviceType.name}</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>{serviceType.requires_elder && <span style={css.badge(G.accent)}>Precisa idoso</span>}{serviceType.requires_glucose && <span style={css.badge(G.teal)}>Pede glicose</span>}{serviceType.requires_period && <span style={css.badge(G.purple)}>Pede período</span>}</div></div><input type="number" style={css.input} value={caregiverForm.service_rates[serviceType.id] ?? ""} onChange={(event) => setCaregiverForm({ ...caregiverForm, service_rates: { ...caregiverForm.service_rates, [serviceType.id]: event.target.value } })} placeholder="Valor" /></div>)}
           </div>
           <div style={{ display: "flex", gap: 10 }}><button style={css.btn()} onClick={saveCaregiver}>Salvar</button><button style={css.btnGhost} onClick={closeCaregiver}>Cancelar</button></div>
         </Modal>
