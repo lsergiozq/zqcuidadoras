@@ -60,6 +60,7 @@ export default function App() {
   if (!isAdmin) {
     return (
       <MobileCtx.Provider value={isMobile}>
+        <UpdateBanner />
         <CaregiverPortalPage
           session={session}
           dashboard={caregiverData.dashboard}
