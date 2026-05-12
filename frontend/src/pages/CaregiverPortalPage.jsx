@@ -6,7 +6,7 @@ import { ErrorBanner, Field, StatCard } from "../components/ui";
 const CAREGIVER_PORTAL_NAV = [
   { id: "dash", label: "Home", icon: "🏠", color: G.accent },
   { id: "shift", label: "Plantão", icon: "📋", color: G.accent },
-  { id: "service", label: "Medição/Aplicação", icon: "🩺", color: G.teal },
+  { id: "service", label: "Aplicações", icon: "💉", color: G.teal },
   { id: "hour", label: "Hora Avulsa", icon: "🕒", color: G.purple },
   { id: "sep", label: "Separação", icon: "💊", color: G.green },
 ];
