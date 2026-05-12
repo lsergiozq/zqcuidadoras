@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { G, css, useMobile } from "../app/shared";
 
 export function Field({ label, children }) {
@@ -49,15 +50,115 @@ export const TABS = [
   ["sep", "📦", "Separação"],
 ];
 
+const PRIMARY_TABS = [
+  ["dash", "🏠", "Início"],
+  ["shifts", "📋", "Lançamentos"],
+  ["sep", "📦", "Separação"],
+  ["reports", "📑", "Relatórios"],
+];
+
+const MORE_TABS = [
+  ["cal", "📅", "Calendário"],
+  ["weekly", "📆", "Semanal"],
+  ["monthly", "🗓️", "Mensal"],
+  ["cgs", "🗂️", "Cadastros"],
+  ["meds", "💊", "Medicamentos"],
+];
+
 export function BottomNav({ tab, setTab }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const isMore = MORE_TABS.some(([id]) => id === tab);
+
+  const handleSelect = (id) => {
+    setTab(id);
+    setDrawerOpen(false);
+  };
+
+  const navItemStyle = (active) => ({
+    flex: 1,
+    padding: "8px 4px 12px",
+    border: "none",
+    background: "none",
+    color: active ? G.accent : G.muted,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+    cursor: "pointer",
+    fontWeight: active ? 700 : 500,
+  });
+
   return (
-    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: G.card, borderTop: `1px solid ${G.cardBorder}`, display: "flex", zIndex: 100 }}>
-      {TABS.map(([id, icon, label]) => (
-        <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: "8px 2px 10px", border: "none", background: "none", color: tab === id ? G.accent : G.muted, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, cursor: "pointer", fontSize: 10, fontWeight: tab === id ? 700 : 500 }}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
-          <span style={{ fontSize: 9 }}>{label}</span>
+    <>
+      {drawerOpen && (
+        <div
+          onClick={() => setDrawerOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "#000000aa", zIndex: 150 }}
+        />
+      )}
+
+      {drawerOpen && (
+        <div style={{
+          position: "fixed", bottom: 64, left: 0, right: 0,
+          background: G.card, borderTop: `1px solid ${G.cardBorder}`,
+          borderTopLeftRadius: 18, borderTopRightRadius: 18,
+          padding: "20px 16px 24px",
+          zIndex: 160,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: G.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Mais</span>
+            <button
+              onClick={() => setDrawerOpen(false)}
+              style={{ marginLeft: "auto", background: "none", border: "none", color: G.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }}
+            >×</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            {MORE_TABS.map(([id, icon, label]) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => handleSelect(id)}
+                  style={{
+                    border: `1px solid ${active ? G.accent + "66" : G.cardBorder}`,
+                    borderRadius: 12,
+                    background: active ? G.accent + "18" : "transparent",
+                    color: active ? G.accent : G.muted,
+                    padding: "14px 8px",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+                    cursor: "pointer", fontWeight: active ? 700 : 500,
+                  }}
+                >
+                  <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
+                  <span style={{ fontSize: 12 }}>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: G.card, borderTop: `1px solid ${G.cardBorder}`,
+        display: "flex", zIndex: 170,
+      }}>
+        {PRIMARY_TABS.map(([id, icon, label]) => {
+          const active = tab === id;
+          return (
+            <button key={id} onClick={() => handleSelect(id)} style={navItemStyle(active)}>
+              <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
+              <span style={{ fontSize: 11 }}>{label}</span>
+              {active && <span style={{ width: 4, height: 4, borderRadius: "50%", background: G.accent }} />}
+            </button>
+          );
+        })}
+        <button onClick={() => setDrawerOpen((v) => !v)} style={navItemStyle(isMore || drawerOpen)}>
+          <span style={{ fontSize: 22, lineHeight: 1 }}>{isMore ? MORE_TABS.find(([id]) => id === tab)?.[1] : "⋯"}</span>
+          <span style={{ fontSize: 11 }}>{isMore ? MORE_TABS.find(([id]) => id === tab)?.[2] : "Mais"}</span>
+          {isMore && <span style={{ width: 4, height: 4, borderRadius: "50%", background: G.accent }} />}
         </button>
-      ))}
-    </div>
+      </div>
+    </>
   );
 }
