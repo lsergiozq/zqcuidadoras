@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { MobileCtx, G, css, useIsMobile } from "./app/shared";
 import { AUTH_CHANGED_EVENT, clearSession, getSession, getToken } from "./app/auth";
 import { useCaregiverData, useData } from "./app/hooks";
-import { BottomNav, ErrorBanner, TABS } from "./components/ui";
+import { BottomNav, ErrorBanner, UpdateBanner, TABS } from "./components/ui";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import CalendarPage from "./pages/CalendarPage";
@@ -116,6 +116,7 @@ export default function App() {
           )}
         </div>
 
+        <UpdateBanner />
         <main style={isMobile ? css.mainMobile : css.main}>
           <ErrorBanner msg={error} />
           {tab === "dash" && <DashboardPage caregivers={caregivers} shifts={shifts} extras={extras} />}

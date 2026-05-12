@@ -1,5 +1,31 @@
 import { useState } from "react";
+import { useRegisterSW } from "virtual:pwa-register/react";
 import { G, css, useMobile } from "../app/shared";
+
+export function UpdateBanner() {
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
+  if (!needRefresh) return null;
+  return (
+    <div style={{
+      position: "fixed", top: 56, left: 0, right: 0, zIndex: 300,
+      background: G.accent, color: "#fff",
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+      padding: "10px 16px", fontSize: 13, fontWeight: 500,
+    }}>
+      <span>🔄 Nova versão disponível!</span>
+      <button
+        onClick={() => updateServiceWorker(true)}
+        style={{
+          background: "#ffffff33", border: "1px solid #ffffff55",
+          color: "#fff", borderRadius: 6, padding: "4px 12px",
+          fontSize: 12, fontWeight: 700, cursor: "pointer",
+        }}
+      >
+        Atualizar
+      </button>
+    </div>
+  );
+}
 
 export function Field({ label, children }) {
   return <div style={{ marginBottom: 16 }}><label style={css.label}>{label}</label>{children}</div>;
